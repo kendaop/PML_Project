@@ -1,0 +1,176 @@
+---
+title: "Predicting Quality of Exercise Activity"
+author: "Kendall Parks"
+output: html_document
+---
+## Synopsis  
+For this assignment, we were tasked with creating a prediction algorithm which would correctly predict 
+the classifications of twenty observations. The dataset includes data recorded from accelerometers 
+attached to the forearm, arm, dumbell, and belt of six subjects while they perform different exercise 
+activities. In order to study if it's possible to predict whether a person performs an exercise well, 
+the subjects were asked to perform these exercises correctly and incorrectly in five different ways.
+
+## Getting the Data  
+The training data for this assignment is located at 
+<a href="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv">
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+</a>. The test data is located at <a href="https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv">
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+</a>. The data was originally downloaded on 7/25/2014.  
+  
+I have set a random seed, for reproducible results.
+```{r, eval=FALSE}
+if(!exists("RESET")) RESET = F
+
+library("caret")
+
+# Set up variables.
+url = "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testurl = "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+set.seed(666)
+
+# Download the data files, if they don't exist in the working directory.
+if(!exists("training.data", inherits=F)) {
+   message("Downloading and reading training csv file...")
+   training.data = read.csv(url(url, "r"))
+}
+
+if(!exists("test.data", inherits=F)) {
+   message("Downloading and reading test csv file...")
+   test.data = read.csv(url(testurl, "r"))
+}
+```
+
+## Pre-Processing  
+I first took a quick look at the data in the final test set. I noticed that several of the columns were 
+completely empty. Since any prediction based off of this missing data would be faulty, I removed those
+columns from all of my datasets.  
+  
+A few columns, from their very nature, didn't seem to have any bearing on how well a subject performed 
+an exercise, so I removed those from the datasets as well. For example, the subject's name, or the time 
+of day, didn't seem to matter, for the purposes of this analysis.
+
+```{r, eval=FALSE}
+# Take a look at the test data.
+head(test.data)
+
+# Some of the test.data columns are empty.
+# Create a list of the empty columns.
+keepers = rep(NA, ncol(test.data))
+for(i in 1:ncol(test.data)) {
+   keepers[i] = sum(complete.cases(test.data[,i])) == nrow(test.data)
+}
+
+# Remove columns from which the test data has no data for.
+# Create a sub-training set. Further columns will be removed from this set.
+test.data = test.data[, keepers]
+training.data = train = training.data[, keepers]
+
+# Drop some seemingly unnecessary columns.
+drops = c("X", "user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window")
+train = training.data[, !names(training.data) %in% drops]
+test.data = test.data[, !names(test.data) %in% drops]
+```
+
+## Fitting a Random Forests Model to the Data  
+Next, I split the data up into sub- training and test sets. 40% of the data was assigned to this 
+sub-test set, and was set aside for analysis of the prediction model.  
+  
+Due to the general accuracy of the Random Forests algorithm on complex datasets, I decided to apply 
+one to this data set. The speed of computation was not an issue for me, as I was using a relatively 
+"powerful" computer, and could afford to wait as long as necessary. This Random Forests algorithm 
+applied 25 bootstrapped re-samples to the data. My goal was to get at least an expected accuracy rate 
+of 98% (less than 2% error) before submitting my predictions for grading.
+  
+<span style="font-style:italic; color:gray; font-size:12px">This portion of the code took my computer 
+11-14 minutes to run, with a 3.5 GHz 8-core processor and 8GB of RAM. I would recommend implementing 
+a parallel processing library, before executing the code. Because of the amount of time required to 
+fit the model, I implemented a simple reset switch, which prevented this portion of the code from 
+executing, unless I called `r RESET = T` from the console.</span>
+```{r, eval=FALSE}
+# This is very time-consuming, so don't execute if I haven't flagged RStudio to reset.
+if(RESET) {
+   RESET = F
+   
+   library("doParallel")
+   ignorecores = 0
+   cl<-makeCluster(detectCores() - ignorecores)
+   registerDoParallel(cl)
+   
+   # Create partitions.
+   intrain = createDataPartition(train$classe, p=0.6, list=F)
+   
+   # Split training data into training and testing datasets.
+   test  = train[-intrain,]
+   train = train[intrain,]
+   
+   # Create model fit on training data.
+   message("Training model...")
+   begin = Sys.time()
+   modelfit = train(classe ~ ., data=train, method="rf")
+   end = Sys.time()
+   
+   message(sprintf("Time to fit model: %d minutes %d seconds.",
+                floor(as.numeric(end-begin, units="mins")), 
+                floor(as.numeric(end-begin, units="secs")) %% 60))
+}
+
+```
+  
+## Prediction and Analysis  
+Then, I applied the fitted predicion model to sub-test set, and computed the estimated out-of-sample 
+error rate.
+
+```{r, eval=FALSE}
+# Create prediction for training test data.
+prediction = predict(modelfit, test)
+
+# Create confusion matrix.
+confusionMatrix(test$classe, prediction) 
+```
+
+The cross-validated error rate turned out to be 1.07% (98.9% accuracy). The confusion matrix is below.  
+```{r, eval=FALSE}
+Confusion Matrix and Statistics
+
+          Reference
+Prediction    A    B    C    D    E
+         A 2227    5    0    0    0
+         B   15 1495    8    0    0
+         C    0   24 1341    3    0
+         D    0    0   26 1260    0
+         E    0    0    0    3 1439
+
+Overall Statistics
+                                          
+               Accuracy : 0.9893          
+                 95% CI : (0.9868, 0.9915)
+    No Information Rate : 0.2858          
+    P-Value [Acc > NIR] : < 2.2e-16       
+                                          
+                  Kappa : 0.9865          
+ Mcnemar's Test P-Value : NA              
+
+Statistics by Class:
+
+                     Class: A Class: B Class: C Class: D Class: E
+Sensitivity            0.9933   0.9810   0.9753   0.9953   1.0000
+Specificity            0.9991   0.9964   0.9958   0.9960   0.9995
+Pos Pred Value         0.9978   0.9848   0.9803   0.9798   0.9979
+Neg Pred Value         0.9973   0.9954   0.9948   0.9991   1.0000
+Prevalence             0.2858   0.1942   0.1752   0.1614   0.1834
+Detection Rate         0.2838   0.1905   0.1709   0.1606   0.1834
+Detection Prevalence   0.2845   0.1935   0.1744   0.1639   0.1838
+Balanced Accuracy      0.9962   0.9887   0.9856   0.9957   0.9998
+
+```
+
+Satisfied with the estimated accuracy, I decided to try it out on the real test data. I created 
+predictions by applying the model to the real test data, and submitted my answers for grading.
+```{r, eval=FALSE}
+# Create prediction for test data.
+testprediction = predict(modelfit, test.data)
+```
+  
+## Results  
+All of the test predictions were correct.
